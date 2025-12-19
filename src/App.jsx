@@ -283,50 +283,88 @@ const DetailsScreen = ({ amount, setAmount, currency, setCurrency, setCurrentScr
 
 // --- CONFIRMATION SCREEN ---
 const ConfirmationScreen = ({ currency, amount, setFraudCase, setShowAlert, setCurrentScreen, recipientData, isPinVerified, onConfirmSuccess }) => {
-  const BASE_BALANCE_SOLES = 12450.00;
-  const EXCHANGE_RATE_VENTA = 3.780;
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   useEffect(() => {
+    // Si ya validó el PIN, no analizamos de nuevo
     if (isPinVerified) return;
 
-    const inputAmount = parseFloat(amount || 0);
-    const maxBalance = currency === 'Soles' ? BASE_BALANCE_SOLES : (BASE_BALANCE_SOLES / EXCHANGE_RATE_VENTA);
-    const isFullAmount = Math.abs(inputAmount - maxBalance) < 0.05;
+    const performFraudAnalysis = async () => {
+      setIsAnalyzing(true);
+      try {
+        const response = await fetch("http://127.0.0.1:8000/analyze_fraud", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            account_id: recipientData.account,
+            amount: parseFloat(amount),
+            type: recipientData.type
+          }),
+        });
 
-    if (isFullAmount) { setFraudCase('case2'); setShowAlert(true); return; }
+        const result = await response.json();
 
-    switch (recipientData.type) {
-      case 'international': setFraudCase('case3'); setShowAlert(true); break;
-      case 'other': setFraudCase('case4'); setShowAlert(true); break;
-      case 'interbank': setFraudCase('case1'); setShowAlert(true); break;
-      default: break;
-    }
-  }, [isPinVerified, amount, currency, recipientData]);
+        // Si la API devuelve un caso de fraude (no es 'success'), activamos el modal
+        if (result.case !== "success") {
+          setFraudCase(result.case);
+          setShowAlert(true);
+        }
+      } catch (error) {
+        console.error("Error conectando al servidor KRAMPUS:", error);
+      } finally {
+        setIsAnalyzing(false);
+      }
+    };
+
+    performFraudAnalysis();
+  }, [isPinVerified]); // Solo se ejecuta al montar la pantalla de confirmación
 
   return (
     <div className="flex-1 bg-white overflow-auto pb-20 relative">
+      {/* Overlay de Carga/Análisis */}
+      {isAnalyzing && (
+        <div className="absolute inset-0 bg-white/90 z-50 flex flex-col items-center justify-center backdrop-blur-sm">
+          <RefreshCw className="w-12 h-12 text-green-500 animate-spin mb-4" />
+          <p className="text-gray-600 font-bold animate-pulse">Analizando seguridad con IA...</p>
+        </div>
+      )}
+
       <div className="px-4 py-6 relative">
-        <button onClick={() => setCurrentScreen('details')} className="absolute left-4 top-4 p-2 rounded-md bg-white shadow-sm border border-gray-100"><ChevronLeft className="w-5 h-5 text-gray-600" /></button>
+        <button onClick={() => setCurrentScreen('details')} className="absolute left-4 top-4 p-2 rounded-md bg-white shadow-sm border border-gray-100">
+          <ChevronLeft className="w-5 h-5 text-gray-600" />
+        </button>
         <h1 className="text-2xl font-semibold text-gray-800 text-center mb-8">Confirmación</h1>
+        
         <div className="space-y-6 mb-8 bg-white rounded-xl">
-          <div className="border-b border-gray-100 pb-4"><div className="text-sm text-gray-500 mb-1">MONTO TOTAL</div><div className="text-3xl font-bold text-gray-800">{currency === 'Soles' ? 'S/' : '$'} {parseFloat(amount || 0).toFixed(2)}</div></div>
-          <div className="border-b border-gray-100 pb-4"><div className="text-sm text-gray-500 mb-1">DESTINATARIO</div><div className="font-semibold text-gray-800 text-lg">{recipientData.name}</div><div className="text-gray-600 tracking-wide text-sm">{recipientData.account}</div><div className="text-xs text-gray-400 mt-1">{recipientData.bank}</div></div>
-          <div><div className="text-sm text-gray-500 mb-1">CUENTA DE CARGO</div><div className="font-semibold text-gray-800">Ahorro Sueldo Soles</div><div className="text-gray-600 text-sm">**** 8930</div></div>
+          <div className="border-b border-gray-100 pb-4">
+            <div className="text-sm text-gray-500 mb-1">MONTO TOTAL</div>
+            <div className="text-3xl font-bold text-gray-800">{currency === 'Soles' ? 'S/' : '$'} {parseFloat(amount || 0).toFixed(2)}</div>
+          </div>
+          <div className="border-b border-gray-100 pb-4">
+            <div className="text-sm text-gray-500 mb-1">DESTINATARIO</div>
+            <div className="font-semibold text-gray-800 text-lg">{recipientData.name}</div>
+            <div className="text-gray-600 tracking-wide text-sm">{recipientData.account}</div>
+          </div>
         </div>
         
         {isPinVerified ? (
-           <div className="mb-8 flex items-center gap-3 bg-green-50 p-4 rounded-xl border border-green-100 animate-in fade-in">
+           <div className="mb-8 flex items-center gap-3 bg-green-50 p-4 rounded-xl border border-green-100">
              <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0" />
-             <p className="text-xs text-green-800 leading-relaxed">Identidad validada correctamente. Puedes finalizar la operación.</p>
+             <p className="text-xs text-green-800 leading-relaxed">Identidad validada por <strong>KRAMPUS</strong>. Puedes finalizar.</p>
            </div>
         ) : (
           <div className="mb-8 flex items-center gap-3 bg-blue-50 p-4 rounded-xl border border-blue-100">
             <Shield className="w-6 h-6 text-blue-600 flex-shrink-0" />
-            <p className="text-xs text-blue-800 leading-relaxed">Esta operación está protegida por <strong>KRAMPUS Security</strong>. Analizamos tu transacción en tiempo real.</p>
+            <p className="text-xs text-blue-800 leading-relaxed">Operación protegida. Analizando en tiempo real.</p>
           </div>
         )}
 
-        <button onClick={onConfirmSuccess} className="w-full bg-green-500 text-white py-4 rounded-xl font-medium text-lg shadow-lg hover:bg-green-600 transition">Confirmar Transferencia</button>
+        <button 
+          onClick={onConfirmSuccess} 
+          className="w-full bg-green-500 text-white py-4 rounded-xl font-medium text-lg shadow-lg hover:bg-green-600 transition"
+        >
+          Confirmar Transferencia
+        </button>
       </div>
     </div>
   );
